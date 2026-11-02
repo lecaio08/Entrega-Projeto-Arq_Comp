@@ -10,6 +10,9 @@
 //   I-type  (0000011): lw
 //   S-type  (0100011): sw
 //   B-type  (1100011): beq
+//   I-type  (0010011): addi, andi, ori, slti, slli, srli, srai
+//   U-type  (0110111): lui
+//   U-type  (0010111): auipc
 //
 // Tabela de sinais de controle:
 //   Sinal     | R-type | lw | sw | beq
@@ -34,13 +37,17 @@ module pl_control (
     output logic       MemRead,
     output logic       MemWrite,
     output logic       Branch,
-    output logic [1:0] ALUOp
+    output logic [1:0] ALUOp,
+    output logic [1:0] ASrc       // origem de SrcA: 00=rs1, 01=PC, 10=zero
 );
 
     localparam R_TYPE = 7'b0110011;
     localparam LOAD   = 7'b0000011;
     localparam STORE  = 7'b0100011;
     localparam BRANCH = 7'b1100011;
+    localparam OP_IMM = 7'b0010011;
+    localparam LUI    = 7'b0110111;
+    localparam AUIPC  = 7'b0010111;
 
     always_comb begin
         ALUSrc   = 1'b0;
@@ -50,6 +57,7 @@ module pl_control (
         MemWrite = 1'b0;
         Branch   = 1'b0;
         ALUOp    = 2'b00;
+        ASrc     = 2'b00;
 
         case (Opcode)
             R_TYPE: begin
@@ -73,6 +81,23 @@ module pl_control (
             BRANCH: begin
                 Branch   = 1'b1;
                 ALUOp    = 2'b01;
+            end
+            OP_IMM: begin
+                ALUSrc   = 1'b1;
+                RegWrite = 1'b1;
+                ALUOp    = 2'b11;
+            end
+            LUI: begin
+                ALUSrc   = 1'b1;
+                RegWrite = 1'b1;
+                ALUOp    = 2'b00;      // ADD: 0 + imm
+                ASrc     = 2'b10;
+            end
+            AUIPC: begin
+                ALUSrc   = 1'b1;
+                RegWrite = 1'b1;
+                ALUOp    = 2'b00;      // ADD: PC + imm
+                ASrc     = 2'b01;
             end
             default: ; // sinais permanecem em zero (seguro)
         endcase
