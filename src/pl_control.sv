@@ -13,6 +13,8 @@
 //   I-type  (0010011): addi, andi, ori, slti, slli, srli, srai
 //   U-type  (0110111): lui
 //   U-type  (0010111): auipc
+//   J-type  (1101111): jal
+//   I-type  (1100111): jalr
 //
 // Tabela de sinais de controle:
 //   Sinal     | R-type | lw | sw | beq
@@ -38,7 +40,8 @@ module pl_control (
     output logic       MemWrite,
     output logic       Branch,
     output logic [1:0] ALUOp,
-    output logic [1:0] ASrc       // origem de SrcA: 00=rs1, 01=PC, 10=zero
+    output logic [1:0] ASrc,      // origem de SrcA: 00=rs1, 01=PC, 10=zero
+    output logic [1:0] Jump       // 00=nenhum, 01=JAL, 10=JALR
 );
 
     localparam R_TYPE = 7'b0110011;
@@ -48,6 +51,8 @@ module pl_control (
     localparam OP_IMM = 7'b0010011;
     localparam LUI    = 7'b0110111;
     localparam AUIPC  = 7'b0010111;
+    localparam JAL    = 7'b1101111;
+    localparam JALR   = 7'b1100111;
 
     always_comb begin
         ALUSrc   = 1'b0;
@@ -58,6 +63,7 @@ module pl_control (
         Branch   = 1'b0;
         ALUOp    = 2'b00;
         ASrc     = 2'b00;
+        Jump     = 2'b00;
 
         case (Opcode)
             R_TYPE: begin
@@ -87,6 +93,7 @@ module pl_control (
                 RegWrite = 1'b1;
                 ALUOp    = 2'b11;
             end
+            // LUI/AUIPC: ALU soma imm_U a SrcA; ASrc escolhe o que entra em SrcA
             LUI: begin
                 ALUSrc   = 1'b1;
                 RegWrite = 1'b1;
@@ -98,6 +105,18 @@ module pl_control (
                 RegWrite = 1'b1;
                 ALUOp    = 2'b00;      // ADD: PC + imm
                 ASrc     = 2'b01;
+            end
+            // JAL/JALR: o desvio em si e feito em EX (pl_datapath) via Jump; aqui so
+            // habilita o write-back (rd <- PC+4). JALR usa a ALU p/ calcular rs1+imm.
+            JAL: begin
+                RegWrite = 1'b1;       // rd <- PC+4 (feito em EX)
+                Jump     = 2'b01;
+            end
+            JALR: begin
+                ALUSrc   = 1'b1;       // alvo = rs1 + imm (ALU: ADD)
+                RegWrite = 1'b1;
+                ALUOp    = 2'b00;
+                Jump     = 2'b10;
             end
             default: ; // sinais permanecem em zero (seguro)
         endcase
