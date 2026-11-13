@@ -28,6 +28,7 @@ package pl_pipe_pkg;
         logic        mem_write;
         logic [1:0]  alu_op;
         logic        branch;
+        logic [1:0]  jump;       // 00=nenhum, 01=JAL, 10=JALR
         // dados
         logic [31:0] pc;
         logic [31:0] rd1;       // saida 1 do banco de registradores
