@@ -28,7 +28,16 @@ module pl_alu_ctrl (
         case (ALUOp)
             2'b00: Operation = 4'd01;   // Load / Store -> ADD
 
-            2'b01: Operation = 4'd02;   // Branch BEQ  -> SUB
+            2'b01: begin                // Branch: depende do Funct3
+                // A ALU so calcula; quem decide 'tomado ou nao' e o pl_datapath
+                // (take_branch). BLT/BGE usam SLT e BLTU/BGEU usam SLTU para obter
+                // o bit (rs1 < rs2) com/sem sinal; BEQ/BNE usam SUB e a flag Zero.
+                case (Funct3)
+                    3'h4, 3'h5: Operation = 4'd11;  // BLT / BGE   -> SLT
+                    3'h6, 3'h7: Operation = 4'd12;  // BLTU / BGEU -> SLTU
+                    default:    Operation = 4'd02;  // BEQ / BNE   -> SUB (Zero)
+                endcase
+            end
 
             2'b10: begin                // R-type: decodificar Funct
                 case (Funct3)
@@ -45,6 +54,10 @@ module pl_alu_ctrl (
             end
 
             2'b11: begin                // I-type aritmetico: so Funct3
+                // ATENCAO: aqui NAO se olha Funct7 para ADDI/ANDI/ORI/SLTI/SLLI, porque
+                // os bits [31:25] da instrucao sao parte do imediato (ex.: addi x1,x0,1024
+                // tem Funct7[5]=1 e mesmo assim e ADD, nao SUB). So SRLI/SRAI usam
+                // Funct7[5] (0100000 = SRAI) para distinguir deslocamento aritmetico.
                 case (Funct3)           // (Funct7[5] apenas para SRAI/SRLI;
                     3'h0: Operation = 4'd01;  // ADDI  (nao usar Funct7: e imediato)
                     3'h1: Operation = 4'd07;  // SLLI
