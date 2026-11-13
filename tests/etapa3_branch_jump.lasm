@@ -1,0 +1,111 @@
+# ---- prologo: zera os registradores lidos antes de escritos (regfile sem reset)
+addi x5,x0,0
+addi x8,x0,0
+addi x10,x0,0
+addi x11,x0,0
+addi x12,x0,0
+addi x13,x0,0
+addi x14,x0,0
+addi x15,x0,0
+addi x16,x0,0
+addi x17,x0,0
+addi x18,x0,0
+addi x19,x0,0
+addi x20,x0,0
+addi x24,x0,0
+addi x25,x0,0
+addi x26,x0,0
+addi x27,x0,0
+addi x30,x0,0
+addi x31,x0,0
+addi x1,x0,5
+addi x2,x0,7
+addi x3,x0,-3
+# ---- BNE (tomado / nao tomado); instrucoes na sombra nao podem commitar
+bne x1,x2,L1
+addi x10,x0,111
+L1:
+addi x10,x10,1
+bne x1,x1,L2
+addi x11,x0,2
+L2:
+# ---- BLT / BGE (com sinal)
+blt x3,x1,L3
+addi x12,x0,111
+L3:
+addi x12,x12,3
+blt x1,x3,L4
+addi x13,x0,4
+L4:
+bge x1,x3,L5
+addi x14,x0,111
+L5:
+addi x14,x14,5
+bge x1,x1,L6
+addi x15,x15,111
+L6:
+addi x15,x15,6
+bge x3,x1,L7
+addi x16,x0,7
+L7:
+# ---- BLTU / BGEU (sem sinal: -3 e enorme)
+bltu x1,x3,L8
+addi x17,x0,111
+L8:
+addi x17,x17,8
+bltu x3,x1,L9
+addi x18,x0,9
+L9:
+bgeu x3,x1,L10
+addi x19,x0,111
+L10:
+addi x19,x19,10
+bgeu x1,x3,L11
+addi x20,x0,11
+L11:
+# ---- BEQ tomado e loop para tras (forwarding do addi para o bne)
+beq x1,x1,L12
+addi x20,x20,111
+L12:
+addi x21,x0,4
+addi x22,x0,0
+LOOP:
+addi x22,x22,3
+addi x21,x21,-1
+bne x21,x0,LOOP
+# ---- load-use direto em branch
+lw x7,0(x0)
+bne x7,x0,L13
+addi x8,x0,111
+L13:
+addi x8,x8,17
+# ---- JAL: link em rd; sombra com store nao pode escrever
+jal x23,J1
+addi x24,x0,111
+addi x24,x0,111
+J1:
+addi x24,x24,1
+jal x0,J2
+sw x1,44(x0)
+addi x25,x0,111
+J2:
+# ---- JAL/JALR como chamada e retorno
+jal x1,FUNC
+addi x26,x0,13
+jal x0,END1
+FUNC:
+addi x27,x0,14
+jalr x0,x1,0
+addi x27,x0,111
+END1:
+# ---- JALR: alvo = (rs1+imm) com bit 0 zerado; rs1 vindo de auipc (forwarding)
+auipc x28,0
+jalr x29,x28,13
+addi x30,x0,111
+addi x31,x0,15
+# ---- JALR com rd == rs1
+auipc x2,0
+jalr x2,x2,12
+addi x3,x0,111
+addi x5,x0,16
+beq x0,x0,0
