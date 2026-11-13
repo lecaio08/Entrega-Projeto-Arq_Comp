@@ -30,6 +30,8 @@ module pl_datapath (
 
     // Sinais de controle vindos do estagio ID (pl_control)
     input  logic        ALUSrc,
+    input  logic [1:0]  ASrc,       // origem de SrcA (LUI/AUIPC): 00=rs1, 01=PC, 10=zero
+    input  logic [1:0]  Jump,       // 00=nenhum, 01=JAL, 10=JALR (resolvidos em EX)
     input  logic        MemtoReg,
     input  logic        RegWrite,
     input  logic        MemRead,
@@ -88,9 +90,13 @@ module pl_datapath (
 
     // EX -- forwarding
     logic [1:0]  fwd_a, fwd_b;
-    logic [31:0] fwd_srca, fwd_srcb, alu_srcb;
+    logic [31:0] fwd_srca, fwd_srcb, alu_srca, alu_srcb;
     logic [31:0] alu_result;
     logic        zero;
+    logic        take_branch;     // condicao do desvio avaliada em EX (ver abaixo)
+    logic [31:0] ex_result;       // resultado de EX: ALU ou PC+4 (JAL/JALR)
+    // MEM: SB/SH (mascara + palavra a escrever) e LB/LH/LBU/LHU (byte ja alinhado + valor final)
+    logic [31:0] store_mask, store_word, load_shifted, load_data;
 
     // WB
     logic [31:0] wb_data;
@@ -180,12 +186,14 @@ module pl_datapath (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin                      // reset assicrono (unico sinal na lista)
             id_ex.alu_src    <= 1'b0;
+            id_ex.a_sel      <= 2'b00;
             id_ex.mem_to_reg <= 1'b0;
             id_ex.reg_write  <= 1'b0;
             id_ex.mem_read   <= 1'b0;
             id_ex.mem_write  <= 1'b0;
             id_ex.alu_op     <= 2'b00;
             id_ex.branch     <= 1'b0;
+            id_ex.jump       <= 2'b00;
             id_ex.pc         <= 32'b0;
             id_ex.rd1        <= 32'b0;
             id_ex.rd2        <= 32'b0;
@@ -197,12 +205,14 @@ module pl_datapath (
             id_ex.funct7     <= 7'b0;
         end else if (stall || pc_src) begin    // NOP sincrono: load-use ou branch
             id_ex.alu_src    <= 1'b0;
+            id_ex.a_sel      <= 2'b00;
             id_ex.mem_to_reg <= 1'b0;
             id_ex.reg_write  <= 1'b0;
             id_ex.mem_read   <= 1'b0;
             id_ex.mem_write  <= 1'b0;
             id_ex.alu_op     <= 2'b00;
             id_ex.branch     <= 1'b0;
+            id_ex.jump       <= 2'b00;
             id_ex.pc         <= 32'b0;
             id_ex.rd1        <= 32'b0;
             id_ex.rd2        <= 32'b0;
@@ -214,12 +224,14 @@ module pl_datapath (
             id_ex.funct7     <= 7'b0;
         end else begin
             id_ex.alu_src    <= ALUSrc;
+            id_ex.a_sel      <= ASrc;
             id_ex.mem_to_reg <= MemtoReg;
             id_ex.reg_write  <= RegWrite;
             id_ex.mem_read   <= MemRead;
             id_ex.mem_write  <= MemWrite;
             id_ex.alu_op     <= ALUOp;
             id_ex.branch     <= Branch;
+            id_ex.jump       <= Jump;
             id_ex.pc         <= if_id.pc;
             id_ex.rd1        <= rd1;
             id_ex.rd2        <= rd2;
@@ -269,20 +281,65 @@ module pl_datapath (
         endcase
     end
 
+    // Mux de origem de SrcA (operando A da ALU):
+    //   00 -> rs1 ja adiantado pelo forwarding (todas as demais instrucoes)
+    //   01 -> PC da propria instrucao (AUIPC: rd = PC + imm_U)
+    //   10 -> zero                   (LUI:   rd = 0  + imm_U)
+    // Fica DEPOIS do mux de forwarding de proposito: em LUI/AUIPC os bits [19:15]
+    // da instrucao sao parte do imediato (nao e rs1), entao o forwarding pode
+    // escolher um valor sem sentido, que esse mux simplesmente descarta.
+    always_comb begin
+        case (id_ex.a_sel)
+            2'b01:   alu_srca = id_ex.pc;
+            2'b10:   alu_srca = 32'b0;
+            default: alu_srca = fwd_srca;
+        endcase
+    end
+
     // Mux ALUSrc: imediato ou registrador
     assign alu_srcb = id_ex.alu_src ? id_ex.imm_ext : fwd_srcb;
 
     pl_alu alu (
-        .SrcA      (fwd_srca),
+        .SrcA      (alu_srca),
         .SrcB      (alu_srcb),
         .Operation (ALU_CC),
         .ALUResult (alu_result),
         .Zero      (zero)
     );
 
-    // Branch resolvido no estagio EX (flush 2 instrucoes se taken)
-    assign branch_target = id_ex.pc + id_ex.imm_ext;
-    assign pc_src        = id_ex.branch && zero;
+    // Branch/jump resolvido no estagio EX (flush de 2 instrucoes se taken)
+    //
+    // Condicao do desvio, decidida pelo funct3 (a ALU ja foi configurada por
+    // pl_alu_ctrl com ALUOp=01 para fazer a operacao certa):
+    //   BEQ  (000) / BNE  (001) : ALU faz SUB  -> usa a flag Zero (rs1 == rs2)
+    //   BLT  (100) / BGE  (101) : ALU faz SLT  -> alu_result[0] = (rs1 < rs2) com sinal
+    //   BLTU (110) / BGEU (111) : ALU faz SLTU -> alu_result[0] = (rs1 < rs2) sem sinal
+    // BNE/BGE/BGEU sao simplesmente a negacao de BEQ/BLT/BLTU.
+    always_comb begin
+        case (id_ex.funct3)
+            3'b000:        take_branch = zero;           // BEQ
+            3'b001:        take_branch = ~zero;          // BNE
+            3'b100, 3'b110: take_branch = alu_result[0]; // BLT, BLTU
+            3'b101, 3'b111: take_branch = ~alu_result[0];// BGE, BGEU
+            default:       take_branch = 1'b0;
+        endcase
+    end
+
+    // Alvo do salto:
+    //   branch / JAL : PC + imm (imm_B ou imm_J, ja montado em pl_sign_ext)
+    //   JALR         : (rs1 + imm_I) com o bit 0 zerado (exigencia da ISA).
+    //                  rs1 + imm_I e o proprio alu_result (ALUSrc=1, ALU faz ADD)
+    // jump[1] = 1 so no JALR. pc_src = 1 vira flush de IF/ID e ID/EX (as 2
+    // instrucoes buscadas depois do salto viram NOP) e carrega o PC com o alvo.
+    assign branch_target = id_ex.jump[1] ? {alu_result[31:1], 1'b0}
+                                         : id_ex.pc + id_ex.imm_ext;
+    assign pc_src        = (id_ex.branch && take_branch) || (id_ex.jump != 2'b00);
+
+    // JAL/JALR gravam PC+4 (endereco de retorno) em rd. Em vez de criar um caminho
+    // novo ate o WB, PC+4 entra no lugar do resultado da ALU: assim o mesmo
+    // caminho EX/MEM -> MEM/WB -> regfile (e o forwarding existente) ja serve.
+    // Para as demais instrucoes ex_result == alu_result (comportamento da base).
+    assign ex_result = (id_ex.jump != 2'b00) ? id_ex.pc + 32'd4 : alu_result;
 
     // =========================================================================
     // Registrador EX/MEM
@@ -302,7 +359,7 @@ module pl_datapath (
             ex_mem.reg_write   <= id_ex.reg_write;
             ex_mem.mem_read    <= id_ex.mem_read;
             ex_mem.mem_write   <= id_ex.mem_write;
-            ex_mem.alu_result  <= alu_result;
+            ex_mem.alu_result  <= ex_result;
             ex_mem.write_data  <= fwd_srcb;   // rs2 adiantado (para SW/MMIO)
             ex_mem.rd          <= id_ex.rd;
             ex_mem.funct3      <= id_ex.funct3;
@@ -314,11 +371,31 @@ module pl_datapath (
     // =========================================================================
     assign mmio_sel = ex_mem.alu_result[10];
 
+    // SB/SH: a dmem so escreve palavras inteiras, entao fazemos read-modify-write:
+    // le a palavra atual (dmem_rd, leitura assincrona), troca so os bytes
+    // selecionados e escreve a palavra de volta. Nao foi preciso alterar a pl_dmem.
+    //   store_mask : 1s nos bytes que o store altera (funct3: 000=SB, 001=SH, 010=SW)
+    //   o deslocamento {addr[1:0],3'b000} = 8*addr[1:0] posiciona mascara e dado
+    // Exemplo SB em addr[1:0]=2, rs2=0x000000AB, palavra antiga=0x11223344:
+    //   mascara=0x00FF0000, dado deslocado=0x00AB0000 -> escreve 0x11AB3344
+    // SW: mascara=FFFFFFFF -> escreve write_data inteiro (identico a base).
+    // Obs.: SH assume endereco alinhado em 2 bytes. Escrita em MMIO (mmio_sel)
+    // continua recebendo rs2 bruto (ex_mem.write_data) -> use SW para LEDs/UART.
+    always_comb begin
+        case (ex_mem.funct3[1:0])
+            2'b00:   store_mask = 32'h000000FF << {ex_mem.alu_result[1:0], 3'b000}; // SB
+            2'b01:   store_mask = 32'h0000FFFF << {ex_mem.alu_result[1:0], 3'b000}; // SH
+            default: store_mask = 32'hFFFFFFFF;                                     // SW
+        endcase
+    end
+    assign store_word = (dmem_rd & ~store_mask)
+                      | ((ex_mem.write_data << {ex_mem.alu_result[1:0], 3'b000}) & store_mask);
+
     pl_dmem dmem (
         .clk       (clk),
         .MemWrite  (ex_mem.mem_write & ~mmio_sel),
         .addr      (ex_mem.alu_result[9:2]),
-        .WriteData (ex_mem.write_data),
+        .WriteData (store_word),
         .ReadData  (dmem_rd)
     );
 
@@ -340,10 +417,29 @@ module pl_datapath (
 
     assign mem_read_data = mmio_sel ? mmio_rd : dmem_rd;
 
+    // Loads: a memoria sempre devolve a palavra inteira. Aqui desloca o byte/meia-
+    // palavra pedido para a posicao 0 (load_shifted) e estende para 32 bits:
+    //   LB/LH  (000/001): extensao COM sinal (replica o bit mais significativo)
+    //   LBU/LHU(100/101): extensao com zeros
+    //   LW     (010)    : palavra inteira (default, comportamento da base)
+    // Exemplo LB em addr[1:0]=3, palavra=0x80FF7F01: desloca 24 bits -> 0x80,
+    //   LB = 0xFFFFFF80, LBU = 0x00000080.
+    // O funct3 vem de ex_mem.funct3 (ja existia na base). Vale tambem p/ leitura MMIO.
+    assign load_shifted = mem_read_data >> {ex_mem.alu_result[1:0], 3'b000};
+    always_comb begin
+        case (ex_mem.funct3)
+            3'b000:  load_data = {{24{load_shifted[7]}},  load_shifted[7:0]};   // LB
+            3'b001:  load_data = {{16{load_shifted[15]}}, load_shifted[15:0]};  // LH
+            3'b100:  load_data = {24'b0, load_shifted[7:0]};                    // LBU
+            3'b101:  load_data = {16'b0, load_shifted[15:0]};                   // LHU
+            default: load_data = mem_read_data;                                 // LW
+        endcase
+    end
+
     // Saidas de observabilidade para o testbench
     assign mem_wr_en   = ex_mem.mem_write & ~mmio_sel;
     assign mem_wr_addr = ex_mem.alu_result[9:2];
-    assign mem_wr_data = ex_mem.write_data;
+    assign mem_wr_data = store_word;
 
     // =========================================================================
     // Registrador MEM/WB
@@ -359,7 +455,7 @@ module pl_datapath (
             mem_wb.mem_to_reg <= ex_mem.mem_to_reg;
             mem_wb.reg_write  <= ex_mem.reg_write;
             mem_wb.alu_result <= ex_mem.alu_result;
-            mem_wb.read_data  <= mem_read_data;
+            mem_wb.read_data  <= load_data;
             mem_wb.rd         <= ex_mem.rd;
         end
     end
