@@ -29,13 +29,13 @@ module pl_alu_ctrl (
             2'b00: Operation = 4'd01;   // Load / Store -> ADD
 
             2'b01: begin                // Branch: depende do Funct3
-                // A ALU so calcula; quem decide 'tomado ou nao' e o pl_datapath
-                // (take_branch). BLT/BGE usam SLT e BLTU/BGEU usam SLTU para obter
-                // o bit (rs1 < rs2) com/sem sinal; BEQ/BNE usam SUB e a flag Zero.
+                /* desvios são resolvidos no estágio EX
+                 * ALU faz o cálculo dos endereços e o datapath decide se faz o desvio
+                */
                 case (Funct3)
                     3'h4, 3'h5: Operation = 4'd11;  // BLT / BGE   -> SLT
                     3'h6, 3'h7: Operation = 4'd12;  // BLTU / BGEU -> SLTU
-                    default:    Operation = 4'd02;  // BEQ / BNE   -> SUB (Zero)
+                    default:    Operation = 4'd02;  // BEQ / BNE   -> SUB (flag zero)
                 endcase
             end
 
