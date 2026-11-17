@@ -70,32 +70,32 @@ Processador RISC-V de 32 bits com pipeline de 5 estágios implementado em System
 
 | # | Instrução | Tipo | Opcode  | Status |
 |---|-----------|------|---------|:------:|
-| 1 | `SB`      | S    | 0100011 | ❌ |
-| 2 | `SH`      | S    | 0100011 | ❌ |
+| 1 | `SB`      | S    | 0100011 | ✅ |
+| 2 | `SH`      | S    | 0100011 | ✅ |
 
 #### Desvios condicionais (B-type)
 
 | # | Instrução | Tipo | Opcode  | Status |
 |---|-----------|------|---------|:------:|
-| 1 | `BNE`     | B    | 1100011 | ❌ |
-| 2 | `BLT`     | B    | 1100011 | ❌ |
-| 3 | `BGE`     | B    | 1100011 | ❌ |
-| 4 | `BLTU`    | B    | 1100011 | ❌ |
-| 5 | `BGEU`    | B    | 1100011 | ❌ |
+| 1 | `BNE`     | B    | 1100011 | ✅ |
+| 2 | `BLT`     | B    | 1100011 | ✅ |
+| 3 | `BGE`     | B    | 1100011 | ✅ |
+| 4 | `BLTU`    | B    | 1100011 | ✅ |
+| 5 | `BGEU`    | B    | 1100011 | ✅ |
 
 #### Jumps (J-type)
 
 | # | Instrução | Tipo | Opcode  | Status |
 |---|-----------|------|---------|:------:|
-| 1 | `JAL`     | J    | 1101111 | ❌ |
-| 2 | `JALR`    | I    | 1100111 | ❌ |
+| 1 | `JAL`     | J    | 1101111 | ✅ |
+| 2 | `JALR`    | I    | 1100111 | ✅ |
 
 #### Imediato superior (U-type)
 
 | # | Instrução | Tipo | Opcode  | Status |
 |---|-----------|------|---------|:------:|
-| 1 | `LUI`     | U    | 0110111 | ❌ |
-| 2 | `AUIPC`   | U    | 0010111 | ❌ |
+| 1 | `LUI`     | U    | 0110111 | ✅ |
+| 2 | `AUIPC`   | U    | 0010111 | ✅ |
 
 ---
 
